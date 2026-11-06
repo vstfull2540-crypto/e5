@@ -1,0 +1,84 @@
+
+name: Build EQ AI Mix Vocals Full VST3 (Windows)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eq-ai-mix-vocals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Windows x64 VST3 (MSVC + Ninja)
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure MSVC x64 environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Verify build tools
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+          Get-Command cl.exe -ErrorAction Stop
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_C_COMPILER=cl `
+            -DCMAKE_CXX_COMPILER=cl `
+            -DFETCHCONTENT_QUIET=OFF
+          if ($LASTEXITCODE -ne 0) {
+            throw "CMake configuration failed."
+          }
+
+      - name: Build VST3
+        shell: pwsh
+        run: |
+          cmake --build build `
+            --target EQ_AI_Mix_Vocals_Full_VST3 `
+            --parallel
+          if ($LASTEXITCODE -ne 0) {
+            throw "VST3 compilation failed."
+          }
+
+      - name: Verify VST3 bundle
+        shell: pwsh
+        run: |
+          $bundle = Get-ChildItem -Path build -Recurse -Force |
+            Where-Object {
+              $_.PSIsContainer -and $_.Name -like "*.vst3"
+            } |
+            Select-Object -First 1
+
+          if (-not $bundle) {
+            throw "VST3 bundle was not produced."
+          }
+
+          "VST3_PATH=$($bundle.FullName)" |
+            Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload VST3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EQ-AI-Mix-Vocals-Full-Windows-x64-VST3
+          path: ${{ env.VST3_PATH }}
+          if-no-files-found: error
+          compression-level: 9
